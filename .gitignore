@@ -1,0 +1,52 @@
+# Data files (confidential MLS data - do not commit)
+*.csv
+data/
+
+# API extraction scripts (confidential - do not commit)
+crmls_sold.py
+crmls_listed.py
+
+# SQL files
+*.sql
+
+# PDF documents
+*.pdf
+
+# Plot outputs
+outputs/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.spyderproject
+.spyproject
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Tableau
+*.twb
+*.twbx
+*.hyper
+*.tde
+
+# Claude
+.claude/
