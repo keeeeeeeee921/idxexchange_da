@@ -46,8 +46,12 @@ Replaces hand-written market commentary. Computes monthly KPIs
 Falls back to a deterministic stub if no LLM is available.
 
 ```bash
-.venv/bin/python eda_report.py          # report with an auto "AI 市场综述" section
+.venv/bin/python eda_report.py                    # statewide report with an auto "AI 市场综述" section
+.venv/bin/python ai/reporting/county_reports.py   # fan out: one AI report per top-N county
 ```
+The fan-out is the real leverage of LLM reporting — a human can hand-write one
+market summary, but not 60 every month; this generates one per county into a
+polished HTML report (`outputs/county_reports.html`).
 
 ### M2 · Chat-with-data (text-to-SQL)  ·  `ai/assistant/text_to_sql.py` + `app.py`
 Lets non-technical stakeholders query the data in plain language. The LLM writes
