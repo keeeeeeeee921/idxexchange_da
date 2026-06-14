@@ -18,23 +18,10 @@ Stdlib only (urllib + json) — no SDK install required.
 
 import os
 import json
-import urllib.request
-import urllib.error
 
 import pandas as pd
 
-# Reuse the tiny .env loader from the FRED connector (single source of truth).
-try:
-    from connectors.fred_connector import load_dotenv
-except Exception:  # pragma: no cover - fallback if import path differs
-    def load_dotenv(path=None):
-        return
-
-ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
-DEFAULT_MODEL = "claude-sonnet-4-6"  # good quality / low cost for a report; override via ANTHROPIC_MODEL
-
-OLLAMA_DEFAULT_HOST = "http://localhost:11434"
-OLLAMA_DEFAULT_MODEL = "qwen2.5:3b"  # free local model; strong Chinese. Override via OLLAMA_MODEL
+from ai.shared import llm  # shared provider-agnostic LLM client (anthropic|ollama|stub)
 
 
 # --------------------------------------------------------------------------- #
@@ -169,62 +156,8 @@ def render_prompt(metrics):
 
 
 # --------------------------------------------------------------------------- #
-# 3. LLM call (Anthropic Messages API via urllib) with stub fallback
+# 3. Narrative generation (LLM calls delegated to ai.shared.llm)
 # --------------------------------------------------------------------------- #
-def _get_api_key():
-    load_dotenv()
-    key = os.environ.get("ANTHROPIC_API_KEY")
-    if not key or key.startswith("your_"):
-        return None
-    return key
-
-
-def _call_anthropic(prompt, api_key, model, timeout=60):
-    body = json.dumps({
-        "model": model,
-        "max_tokens": 1024,
-        "system": SYSTEM_PROMPT,
-        "messages": [{"role": "user", "content": prompt}],
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        ANTHROPIC_URL, data=body, method="POST",
-        headers={
-            "x-api-key": api_key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        payload = json.loads(resp.read().decode("utf-8"))
-    # Messages API: {"content": [{"type":"text","text": "..."}], ...}
-    parts = [c.get("text", "") for c in payload.get("content", []) if c.get("type") == "text"]
-    return "".join(parts).strip()
-
-
-def _call_ollama(prompt, model=None, timeout=180):
-    """Call a local Ollama model via its Chat API. Free, offline, no key —
-    data never leaves the machine (best fit for confidential MLS data)."""
-    host = os.environ.get("OLLAMA_HOST", OLLAMA_DEFAULT_HOST).rstrip("/")
-    model = model or os.environ.get("OLLAMA_MODEL", OLLAMA_DEFAULT_MODEL)
-    body = json.dumps({
-        "model": model,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": prompt},
-        ],
-        "stream": False,
-        "format": "json",            # force valid JSON output
-        "options": {"temperature": 0.3},
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        host + "/api/chat", data=body, method="POST",
-        headers={"content-type": "application/json"},
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        payload = json.loads(resp.read().decode("utf-8"))
-    return payload.get("message", {}).get("content", "").strip()
-
-
 def _parse_json_narrative(text):
     """Tolerant parse: strip markdown fences, locate the JSON object."""
     t = text.strip()
@@ -270,42 +203,29 @@ def _stub_narrative(metrics):
     }
 
 
-def generate_narrative(metrics, provider=None, model=None, api_key=None):
+def generate_narrative(metrics, provider=None, model=None):
     """Return {headline, summary, watch[], source}.
 
-    Provider is chosen via the `provider` arg, else the LLM_PROVIDER env var
-    (anthropic | ollama | stub), else auto-detect (Anthropic if a key is set,
-    otherwise stub). Any failure degrades gracefully to the stub.
+    Provider via the `provider` arg, else LLM_PROVIDER env (anthropic|ollama|
+    stub), else auto-detect. Any failure degrades gracefully to the stub.
     """
-    load_dotenv()
-    provider = (provider or os.environ.get("LLM_PROVIDER") or "auto").lower()
-    if provider == "auto":
-        provider = "anthropic" if _get_api_key() else "stub"
+    provider = llm.resolve_provider(provider)
     if provider == "stub":
         return _stub_narrative(metrics)
 
-    prompt = render_prompt(metrics)
+    model = llm.resolve_model(provider, model)
     try:
-        if provider == "anthropic":
-            key = api_key or _get_api_key()
-            if not key:
-                return _stub_narrative(metrics)
-            mdl = model or os.environ.get("ANTHROPIC_MODEL", DEFAULT_MODEL)
-            raw = _call_anthropic(prompt, key, mdl)
-        elif provider == "ollama":
-            mdl = model or os.environ.get("OLLAMA_MODEL", OLLAMA_DEFAULT_MODEL)
-            raw = _call_ollama(prompt, mdl)
-        else:
-            raise ValueError(f"unknown LLM_PROVIDER: {provider}")
-
+        raw = llm.complete(
+            render_prompt(metrics), system=SYSTEM_PROMPT, force_json=True,
+            provider=provider, model=model, temperature=0.3,
+        )
         data = _parse_json_narrative(raw)
         data.setdefault("headline", "")
         data.setdefault("summary", "")
         data.setdefault("watch", [])
-        data["source"] = f"{provider}:{mdl}"
+        data["source"] = f"{provider}:{model}"
         return data
-    except (urllib.error.HTTPError, urllib.error.URLError, ValueError,
-            KeyError, TimeoutError, OSError) as e:
+    except Exception as e:  # noqa: BLE001 — any failure should degrade, not crash
         stub = _stub_narrative(metrics)
         stub["headline"] += f"  [LLM({provider}) 调用失败，已回退：{e}]"
         return stub
