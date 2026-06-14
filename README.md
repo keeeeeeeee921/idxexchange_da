@@ -30,6 +30,7 @@ flowchart TD
     D --> G[M1 · LLM market report<br/>ai/reporting]
     D --> H[M2 · Chat-with-data<br/>ai/assistant + app.py]
     D --> I[M3 · AVM + SHAP<br/>ai/models/avm]
+    D --> K[M4 · Forecasting + alerts<br/>ai/forecast]
     G & H & I --> J[ai/shared/llm.py<br/>provider-agnostic LLM client]
 ```
 
@@ -72,9 +73,19 @@ Test performance: **R² ≈ 0.875, median APE ≈ 8.1%, 58% of predictions withi
 ±10%**. Top SHAP drivers: **longitude, latitude, living area** — i.e. location
 and size. (Good-but-not-perfect metrics confirm the model is leakage-free.)
 
-All three modules share one **provider-agnostic LLM client**
-(`ai/shared/llm.py`): switch between a local model and a cloud API with one env
-var, no code change.
+### M4 · Market forecasting + alerting  ·  `ai/forecast/forecast_market.py`
+Forecasts monthly **median close price** and **closed sales** 3 months ahead
+with SARIMAX (80% confidence intervals), backtests accuracy on a holdout, and
+raises a deviation alert when the latest month falls outside expectation. Uses a
+seasonal-AR model so the intervals stay realistic on the short (~28-month)
+series. Backtest MAPE: price ≈ 2.4%, sales ≈ 12.7%.
+
+```bash
+.venv/bin/python ai/forecast/forecast_market.py   # writes forecast.png + forecast.json to outputs/
+```
+
+M1–M3 share one **provider-agnostic LLM client** (`ai/shared/llm.py`): switch
+between a local model and a cloud API with one env var, no code change.
 
 ---
 
@@ -133,7 +144,8 @@ cp .env.example .env              # set LLM_PROVIDER, optional API keys
 │   ├── shared/llm.py                # provider-agnostic LLM client
 │   ├── reporting/market_narrative.py# M1 — LLM market report
 │   ├── assistant/text_to_sql.py     # M2 — NL → DuckDB SQL
-│   └── models/avm/train_avm.py      # M3 — AVM + SHAP
+│   ├── models/avm/train_avm.py      # M3 — AVM + SHAP
+│   └── forecast/forecast_market.py  # M4 — SARIMAX forecasting + alerts
 ├── app.py                           # M2 — Streamlit chat-with-data UI
 ├── eda_report.py                    # self-contained HTML EDA report (embeds M1)
 ├── run_pipeline.py                  # pipeline orchestrator
@@ -150,7 +162,7 @@ Live API integration (REST, OAuth-style token auth, JSON, pagination) ·
 reproducible data pipelines · feature engineering · data-quality / outlier
 handling · **LLM application development** (prompt engineering, structured
 output, local + cloud backends, graceful degradation) · **text-to-SQL** ·
-**explainable ML** (XGBoost + SHAP, leakage control) · BI dashboards (Tableau) ·
-secrets hygiene.
+**explainable ML** (XGBoost + SHAP, leakage control) · **time-series
+forecasting** (SARIMAX, backtesting) · BI dashboards (Tableau) · secrets hygiene.
 
 > See [`AI_ROADMAP.md`](AI_ROADMAP.md) for the module plan and remaining work.
