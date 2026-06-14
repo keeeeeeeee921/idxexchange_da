@@ -6,6 +6,11 @@ data/
 crmls_sold.py
 crmls_listed.py
 
+# Secrets / API keys (NEVER commit). Keep .env local; commit .env.example only.
+.env
+.env.*
+!.env.example
+
 # SQL files
 *.sql
 

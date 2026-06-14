@@ -13,9 +13,14 @@ Plots:  outputs/sold_plots/
 import pandas as pd
 import numpy as np
 import os
+import sys
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+
+# Make the project root importable so `connectors` resolves regardless of cwd.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from connectors.fred_connector import fetch_mortgage30us_monthly
 
 # =============================================================================
 # Paths
@@ -186,20 +191,9 @@ print(f"\n{'='*70}")
 print("PART 5: MORTGAGE RATE ENRICHMENT")
 print(f"{'='*70}")
 
-url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=MORTGAGE30US"
 try:
-    mortgage = pd.read_csv(url, parse_dates=['observation_date'])
-    mortgage.columns = ['date', 'rate_30yr_fixed']
-    mortgage['rate_30yr_fixed'] = pd.to_numeric(mortgage['rate_30yr_fixed'], errors='coerce')
-    mortgage = mortgage.dropna(subset=['rate_30yr_fixed'])
-
-    # Resample weekly → monthly average
-    mortgage['year_month'] = mortgage['date'].dt.to_period('M')
-    mortgage_monthly = (
-        mortgage.groupby('year_month')['rate_30yr_fixed']
-        .mean()
-        .reset_index()
-    )
+    # REST-first (FRED API, key from .env) with automatic no-key CSV fallback.
+    mortgage_monthly = fetch_mortgage30us_monthly(value_name='rate_30yr_fixed')
     print(f"  FRED data fetched: {len(mortgage_monthly)} monthly rates")
 
     # Create year_month key on sold (keyed off CloseDate)
