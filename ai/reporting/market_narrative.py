@@ -33,6 +33,9 @@ except Exception:  # pragma: no cover - fallback if import path differs
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 DEFAULT_MODEL = "claude-sonnet-4-6"  # good quality / low cost for a report; override via ANTHROPIC_MODEL
 
+OLLAMA_DEFAULT_HOST = "http://localhost:11434"
+OLLAMA_DEFAULT_MODEL = "qwen2.5:3b"  # free local model; strong Chinese. Override via OLLAMA_MODEL
+
 
 # --------------------------------------------------------------------------- #
 # 1. Metrics extraction (deterministic — always runs, no LLM)
@@ -111,6 +114,39 @@ SYSTEM_PROMPT = (
 )
 
 
+def _fmt_pct(x):
+    if x is None:
+        return "数据不足"
+    return f"+{x}%" if x >= 0 else f"{x}%"
+
+
+def _facts_block(metrics):
+    """Pre-labelled, unambiguous fact sheet. Small models mis-narrate raw JSON
+    keys (MoM vs YoY, sign, decimals); spelling out each number's 口径 removes
+    that interpretation burden and sharply cuts numeric errors."""
+    cov, lat = metrics["coverage"], metrics["latest"]
+    mom = metrics["mom_change_pct"]
+    yoy = metrics.get("yoy_change_pct") or {}
+    sr, sd = metrics["series"], metrics["supply_demand"]
+    nl = "数据不足" if lat["new_listings"] is None else f"{lat['new_listings']:,} 套"
+    ratio = "数据不足" if sd["new_listings_to_sales_ratio"] is None else sd["new_listings_to_sales_ratio"]
+    return "\n".join([
+        f"- 数据覆盖：{cov['first_month']} 至 {cov['last_month']}，共 {cov['n_months']} 个月",
+        f"- 最新月份：{lat['month']}",
+        f"- 中位成交价：${lat['median_close_price']:,}"
+        f"（环比 {_fmt_pct(mom.get('median_close_price'))}；同比 {_fmt_pct(yoy.get('median_close_price'))}）",
+        f"- 成交量：{lat['closed_sales']:,} 套"
+        f"（环比 {_fmt_pct(mom.get('closed_sales'))}；同比 {_fmt_pct(yoy.get('closed_sales'))}）",
+        f"- 中位在售天数(DOM)：{lat['median_dom']} 天（环比 {_fmt_pct(mom.get('median_dom'))}）",
+        f"- 中位单价：${lat['median_price_per_sqft']}/sqft",
+        f"- 成交价/原始挂牌价：{lat['avg_close_to_orig_ratio']}（>1 偏卖方市场，<1 偏买方议价）",
+        f"- 当月新增挂牌：{nl}；新增挂牌/成交比：{ratio}",
+        f"- 历史峰值中位价：{sr['peak_median_price']['month']} 的 ${sr['peak_median_price']['value']:,}"
+        f"；当前较峰值 {_fmt_pct(sr['latest_vs_peak_pct'])}",
+        f"- 历史最低中位价：{sr['trough_median_price']['month']} 的 ${sr['trough_median_price']['value']:,}",
+    ])
+
+
 def render_prompt(metrics):
     schema = (
         '{"headline": "<一句话标题>", '
@@ -118,13 +154,16 @@ def render_prompt(metrics):
         '"watch": ["<值得深挖/异常关注点>", "..."]}'
     )
     return (
-        "下面是 CRMLS 加州住宅市场的月度 KPI（JSON）。请基于这些数字撰写一份市场综述。\n\n"
-        f"数据：\n{json.dumps(metrics, ensure_ascii=False, indent=2)}\n\n"
-        "要求：\n"
+        "你是房地产市场分析师。下面是 CRMLS 加州住宅市场的『事实清单』（已标注口径）。\n\n"
+        f"事实清单：\n{_facts_block(metrics)}\n\n"
+        "硬性规则：\n"
+        "- 只能引用事实清单里给出的数字与方向；禁止自行换算、推断或编造任何新数字。\n"
+        "- 『环比』=与上一个月相比；『同比』=与去年同一个月相比；切勿混淆二者。\n"
+        "- 严格照搬正负号与小数位（例如 -1.5% 不可写成 -15%）。\n\n"
+        "写作要求：\n"
         "1) headline：一句话点出当前市场状态。\n"
-        "2) summary：2-3 段，覆盖价格走势(环比/同比)、市场速度(DOM)、成交量与供需、"
-        "以及相对峰值的位置。只用上面给出的数字。\n"
-        "3) watch：2-4 条「值得深挖 / 异常关注」，指向数据里值得进一步调查的点。\n\n"
+        "2) summary：2-3 段，覆盖价格(环比/同比)、市场速度(DOM)、成交量与供需、相对峰值位置。\n"
+        "3) watch：2-4 条「值得深挖 / 异常关注」。\n\n"
         f"严格只输出如下结构的 JSON（不要解释、不要 markdown 代码块）：\n{schema}"
     )
 
@@ -160,6 +199,30 @@ def _call_anthropic(prompt, api_key, model, timeout=60):
     # Messages API: {"content": [{"type":"text","text": "..."}], ...}
     parts = [c.get("text", "") for c in payload.get("content", []) if c.get("type") == "text"]
     return "".join(parts).strip()
+
+
+def _call_ollama(prompt, model=None, timeout=180):
+    """Call a local Ollama model via its Chat API. Free, offline, no key —
+    data never leaves the machine (best fit for confidential MLS data)."""
+    host = os.environ.get("OLLAMA_HOST", OLLAMA_DEFAULT_HOST).rstrip("/")
+    model = model or os.environ.get("OLLAMA_MODEL", OLLAMA_DEFAULT_MODEL)
+    body = json.dumps({
+        "model": model,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ],
+        "stream": False,
+        "format": "json",            # force valid JSON output
+        "options": {"temperature": 0.3},
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        host + "/api/chat", data=body, method="POST",
+        headers={"content-type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        payload = json.loads(resp.read().decode("utf-8"))
+    return payload.get("message", {}).get("content", "").strip()
 
 
 def _parse_json_narrative(text):
@@ -207,25 +270,44 @@ def _stub_narrative(metrics):
     }
 
 
-def generate_narrative(metrics, api_key=None, model=None):
-    """Return {headline, summary, watch[], source}. Uses Claude if a key is
-    available, otherwise a deterministic stub (so it always returns something)."""
-    api_key = api_key or _get_api_key()
-    if not api_key:
+def generate_narrative(metrics, provider=None, model=None, api_key=None):
+    """Return {headline, summary, watch[], source}.
+
+    Provider is chosen via the `provider` arg, else the LLM_PROVIDER env var
+    (anthropic | ollama | stub), else auto-detect (Anthropic if a key is set,
+    otherwise stub). Any failure degrades gracefully to the stub.
+    """
+    load_dotenv()
+    provider = (provider or os.environ.get("LLM_PROVIDER") or "auto").lower()
+    if provider == "auto":
+        provider = "anthropic" if _get_api_key() else "stub"
+    if provider == "stub":
         return _stub_narrative(metrics)
 
-    model = model or os.environ.get("ANTHROPIC_MODEL", DEFAULT_MODEL)
+    prompt = render_prompt(metrics)
     try:
-        raw = _call_anthropic(render_prompt(metrics), api_key, model)
+        if provider == "anthropic":
+            key = api_key or _get_api_key()
+            if not key:
+                return _stub_narrative(metrics)
+            mdl = model or os.environ.get("ANTHROPIC_MODEL", DEFAULT_MODEL)
+            raw = _call_anthropic(prompt, key, mdl)
+        elif provider == "ollama":
+            mdl = model or os.environ.get("OLLAMA_MODEL", OLLAMA_DEFAULT_MODEL)
+            raw = _call_ollama(prompt, mdl)
+        else:
+            raise ValueError(f"unknown LLM_PROVIDER: {provider}")
+
         data = _parse_json_narrative(raw)
         data.setdefault("headline", "")
         data.setdefault("summary", "")
         data.setdefault("watch", [])
-        data["source"] = f"llm:{model}"
+        data["source"] = f"{provider}:{mdl}"
         return data
-    except (urllib.error.HTTPError, urllib.error.URLError, ValueError, KeyError) as e:
+    except (urllib.error.HTTPError, urllib.error.URLError, ValueError,
+            KeyError, TimeoutError, OSError) as e:
         stub = _stub_narrative(metrics)
-        stub["headline"] += f"  [LLM 调用失败，已回退：{e}]"
+        stub["headline"] += f"  [LLM({provider}) 调用失败，已回退：{e}]"
         return stub
 
 
@@ -238,7 +320,7 @@ def narrative_to_html(narrative):
     )
     watch = "".join(f"<li>{w}</li>" for w in narrative.get("watch", []))
     badge = narrative.get("source", "stub")
-    badge_label = "🤖 LLM 生成" if badge.startswith("llm") else "⚙️ 占位示例（未接入 LLM）"
+    badge_label = "⚙️ 占位示例（未接入 LLM）" if badge.startswith("stub") else f"🤖 LLM 生成（{badge}）"
     return f"""
 <div class="ai-summary">
   <h2 style="border:none;padding:0;margin:0 0 4px 0;">AI 市场综述
