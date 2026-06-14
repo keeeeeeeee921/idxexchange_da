@@ -20,6 +20,7 @@ narrative around the charts is Chinese and rendered by the browser.
 """
 
 import os
+import sys
 import base64
 from io import BytesIO
 from datetime import datetime
@@ -46,6 +47,12 @@ SOLD_PATH = os.path.join(PROC, "week7_sold_flagged.csv")
 LISTED_PATH = os.path.join(PROC, "week7_listed_flagged.csv")
 MONTHLY_PATH = os.path.join(TAB, "monthly_market.csv")
 NEWLIST_PATH = os.path.join(TAB, "monthly_new_listings.csv")
+
+# M1: LLM market-narrative module (project root on path so `ai`/`connectors` resolve)
+sys.path.insert(0, BASE_DIR)
+from ai.reporting.market_narrative import (
+    build_market_metrics, generate_narrative, narrative_to_html,
+)
 
 print("=" * 70)
 print("EDA REPORT GENERATOR — WEEKS 1-7")
@@ -115,10 +122,18 @@ list_min, list_max = newlist["yr_mo"].min(), newlist["yr_mo"].max()
 # SECTION 0: Header + overview
 # ===========================================================================
 gen_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+# --- M1: AI market narrative (real LLM if ANTHROPIC_API_KEY is set, else stub) ---
+print("\n[Section] AI market narrative")
+ai_metrics = build_market_metrics(monthly, newlist)
+ai_narrative = generate_narrative(ai_metrics)
+print(f"  narrative source: {ai_narrative['source']}")
+ai_summary_html = narrative_to_html(ai_narrative)
+
 add_html(f"""
 <h1>CRMLS 加州住宅市场 — EDA 报告（Week 1–7）</h1>
 <p class="meta">生成时间：{gen_time} ｜ 数据：CRMLS Sold &amp; Listing 月度抽取（仅 Residential）</p>
-
+{ai_summary_html}
 <h2>1. 概览</h2>
 <p>本报告汇总 Week 1–7 流水线产出的探索性分析。数据是加州 CRMLS 的成交（Sold）与挂牌（Listing）
 记录，按月抽取后拼接、清洗、做特征工程与异常值检测。下表是两条数据线的规模与覆盖区间：</p>
@@ -382,6 +397,11 @@ CSS = """
   h3 { font-size: 16px; margin: 6px 0; }
   .meta { color: #888; font-size: 13px; }
   .flow { background: #eef2f8; padding: 12px 16px; border-radius: 6px; font-size: 14px; }
+  .ai-summary { background: linear-gradient(135deg,#eef4ff,#f7fbff); border: 1px solid #cfe0ff;
+                border-left: 5px solid #4c72b0; border-radius: 8px; padding: 16px 20px; margin: 20px 0; }
+  .ai-summary .ai-headline { font-size: 16px; font-weight: 600; color: #2a3a55; margin: 4px 0 10px; }
+  .ai-badge { font-size: 11px; font-weight: 500; color: #4c72b0; background: #e3edff;
+              padding: 2px 8px; border-radius: 10px; vertical-align: middle; margin-left: 8px; }
   table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14px; }
   th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; }
   th { background: #4c72b0; color: white; }
