@@ -8,3 +8,4 @@ streamlit>=1.40.0  # M2: chat-with-data UI
 scikit-learn>=1.3.0  # M3: AVM split/metrics
 xgboost>=2.0.0       # M3: AVM model (macOS needs system OpenMP: `brew install libomp`)
 shap>=0.44.0         # M3: AVM explainability
+statsmodels>=0.14.0  # M4: SARIMAX forecasting
