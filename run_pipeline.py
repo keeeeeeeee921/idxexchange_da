@@ -10,12 +10,18 @@ Dependency chain:
   Sold:   week1_sold -> week2_3_sold -> week4_5_sold -> week6_sold -> week7_sold
   Listed: week1_listed -> week2_3_listed -> week4_5_listed -> week6_listed -> week7_listed
   Then:   week8_tableau_prep  (needs week7_*_clean from BOTH chains)
-          eda_report          (needs week7_*_flagged + tableau/monthly_*)
+          eda_report          (needs week7_*_flagged + tableau/monthly_*; embeds the M1 LLM summary)
+          county_reports      (AI: per-county LLM market narratives; needs tableau_sold/listed)
+
+The two reporting stages call an LLM (local Ollama by default) and degrade
+gracefully to a deterministic stub if none is available, so the pipeline never
+breaks on a missing model. Run with the project venv so every stage gets the
+right deps:  .venv/bin/python run_pipeline.py
 
 Usage:
-  python3 run_pipeline.py              # run the whole pipeline
-  python3 run_pipeline.py --from week6 # resume from the first stage matching "week6"
-  python3 run_pipeline.py --list       # show stages and exit
+  .venv/bin/python run_pipeline.py              # run the whole pipeline
+  .venv/bin/python run_pipeline.py --from week6 # resume from the first stage matching "week6"
+  .venv/bin/python run_pipeline.py --list       # show stages and exit
 """
 
 import subprocess
@@ -39,7 +45,8 @@ STAGES = [
     "week6_listed.py",
     "week7_listed.py",
     "week8_tableau_prep.py",
-    "eda_report.py",
+    "eda_report.py",                      # statewide EDA report + M1 LLM summary
+    "ai/reporting/county_reports.py",     # M1+ per-county LLM narratives
 ]
 
 
