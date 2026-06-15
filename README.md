@@ -31,6 +31,7 @@ flowchart TD
     D --> H[M2 · Chat-with-data<br/>ai/assistant + app.py]
     D --> I[M3 · AVM + SHAP<br/>ai/models/avm]
     D --> K[M4 · Forecasting + alerts<br/>ai/forecast]
+    D --> L[M5 · Data-quality QA<br/>ai/dataqa]
     G & H & I --> J[ai/shared/llm.py<br/>provider-agnostic LLM client]
 ```
 
@@ -86,6 +87,17 @@ series. Backtest MAPE: price ≈ 2.4%, sales ≈ 12.7%.
 
 ```bash
 .venv/bin/python ai/forecast/forecast_market.py   # writes forecast.png + forecast.json to outputs/
+```
+
+### M5 · Automated data-quality agent  ·  `ai/dataqa/data_quality.py`
+A standalone QA report over the flagged dataset: missing-value analysis, a
+rule-flag summary, and **IsolationForest** multivariate anomaly detection that
+surfaces records which pass every rule but are anomalous in combination (e.g. a
+100-sqft "BoatSlip" priced like a home). Rules catch what you check for; the
+model catches what you didn't.
+
+```bash
+.venv/bin/python ai/dataqa/data_quality.py        # writes data_quality.html to outputs/
 ```
 
 M1–M3 share one **provider-agnostic LLM client** (`ai/shared/llm.py`): switch
@@ -149,7 +161,8 @@ cp .env.example .env              # set LLM_PROVIDER, optional API keys
 │   ├── reporting/market_narrative.py# M1 — LLM market report
 │   ├── assistant/text_to_sql.py     # M2 — NL → DuckDB SQL
 │   ├── models/avm/train_avm.py      # M3 — AVM + SHAP
-│   └── forecast/forecast_market.py  # M4 — SARIMAX forecasting + alerts
+│   ├── forecast/forecast_market.py  # M4 — SARIMAX forecasting + alerts
+│   └── dataqa/data_quality.py       # M5 — data-quality + anomaly detection
 ├── app.py                           # M2 — Streamlit chat-with-data UI
 ├── eda_report.py                    # self-contained HTML EDA report (embeds M1)
 ├── run_pipeline.py                  # pipeline orchestrator
