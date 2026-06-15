@@ -40,8 +40,20 @@ def build_market_metrics(monthly, newlist):
     nl = newlist.sort_values("yr_mo").set_index("yr_mo")
 
     last = m.iloc[-1]
-    prev = m.iloc[-2] if len(m) >= 2 else last
-    yoy = m.iloc[-13] if len(m) >= 13 else None  # same month, prior year
+    # Match prior month / prior year by ACTUAL calendar month, not by row
+    # position — robust to gaps (a county missing a month would otherwise make
+    # iloc[-13] the wrong "same month last year").
+    by_ym = m.set_index("yr_mo")
+    latest_p = pd.Period(last["yr_mo"], freq="M")
+
+    def _row(period):
+        key = str(period)
+        return by_ym.loc[key] if key in by_ym.index else None
+
+    prev = _row(latest_p - 1)
+    if prev is None:                       # fall back to last available month
+        prev = m.iloc[-2] if len(m) >= 2 else last
+    yoy = _row(latest_p - 12)
 
     latest_ym = last["yr_mo"]
     new_listings_latest = float(nl["new_listings"].get(latest_ym, float("nan")))

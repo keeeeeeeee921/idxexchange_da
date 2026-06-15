@@ -30,7 +30,6 @@ import matplotlib.pyplot as plt
 
 import xgboost as xgb
 import shap
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -58,7 +57,8 @@ def load_features():
     X.columns = [str(c) for c in X.columns]
 
     y = np.log1p(df[TARGET].to_numpy())                 # log target (price is right-skewed)
-    return X, y, df[TARGET].to_numpy()
+    tkey = (df["close_year"].astype(int) * 12 + df["close_month"].astype(int)).to_numpy()
+    return X, y, df[TARGET].to_numpy(), tkey
 
 
 def main():
@@ -66,11 +66,21 @@ def main():
     print("AVM — Automated Valuation Model (XGBoost + SHAP)")
     print("=" * 70)
     print(f"\nLoading {DATA} ...")
-    X, y_log, price = load_features()
+    X, y_log, price, tkey = load_features()
     print(f"  {len(X):,} rows x {X.shape[1]} features (after one-hot)")
 
-    X_tr, X_te, y_tr, y_te, _, price_te = train_test_split(
-        X, y_log, price, test_size=0.2, random_state=42)
+    # Time-based split: train on the earliest 80% of sales, test on the most
+    # recent 20%. More honest than a random split for a valuation model — it
+    # measures how well the model generalises FORWARD in time, not by chance.
+    order = np.argsort(tkey, kind="stable")
+    cut = int(len(order) * 0.8)
+    tr_idx, te_idx = order[:cut], order[cut:]
+    X_tr, X_te = X.iloc[tr_idx], X.iloc[te_idx]
+    y_tr, y_te = y_log[tr_idx], y_log[te_idx]
+    price_te = price[te_idx]
+    tp = sorted(set(zip(X_te["close_year"].astype(int), X_te["close_month"].astype(int))))
+    test_period = f"{tp[0][0]}-{tp[0][1]:02d} -> {tp[-1][0]}-{tp[-1][1]:02d}"
+    print(f"  time-based split: test = most recent 20% ({test_period})")
 
     print("\nTraining XGBoost ...")
     model = xgb.XGBRegressor(
@@ -120,6 +130,7 @@ def main():
     model.save_model(model_path)
     metrics = {
         "n_rows": int(len(X)), "n_features": int(X.shape[1]),
+        "split": "time-based (most recent 20% by sale month)", "test_period": test_period,
         "mae": mae, "rmse": rmse, "r2": r2, "mdape_pct": mdape, "ppe10_pct": ppe10,
         "top_drivers": [{"feature": n, "mean_abs_shap": float(v)} for n, v in drivers],
         "excluded_leakage": ["ListPrice", "OriginalListPrice", "price_per_sqft",
