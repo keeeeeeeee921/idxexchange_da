@@ -28,9 +28,11 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-import xgboost as xgb
-import shap
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
+# xgboost + shap are imported lazily inside main() so this module can be
+# imported (e.g. by unit tests / CI) without the system OpenMP runtime xgboost
+# needs on macOS.
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 DATA = os.path.join(BASE_DIR, "data", "processed", "week7_sold_clean.csv")
@@ -62,6 +64,8 @@ def load_features():
 
 
 def main():
+    import xgboost as xgb
+    import shap
     print("=" * 70)
     print("AVM — Automated Valuation Model (XGBoost + SHAP)")
     print("=" * 70)
