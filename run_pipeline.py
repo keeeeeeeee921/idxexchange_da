@@ -11,7 +11,10 @@ Dependency chain:
   Listed: week1_listed -> week2_3_listed -> week4_5_listed -> week6_listed -> week7_listed
   Then:   week8_tableau_prep  (needs week7_*_clean from BOTH chains)
           eda_report          (needs week7_*_flagged + tableau/monthly_*; embeds the M1 LLM summary)
-          county_reports      (AI: per-county LLM market narratives; needs tableau_sold/listed)
+          county_reports      (M1+: per-county LLM market narratives; needs tableau_sold/listed)
+          train_avm           (M3: XGBoost valuation model + SHAP)
+          forecast_market     (M4: SARIMAX forecast + alerts)
+          data_quality        (M5: rule + IsolationForest data-quality report)
 
 The two reporting stages call an LLM (local Ollama by default) and degrade
 gracefully to a deterministic stub if none is available, so the pipeline never
@@ -47,6 +50,9 @@ STAGES = [
     "week8_tableau_prep.py",
     "eda_report.py",                      # statewide EDA report + M1 LLM summary
     "ai/reporting/county_reports.py",     # M1+ per-county LLM narratives
+    "ai/models/avm/train_avm.py",         # M3 AVM home-valuation model + SHAP
+    "ai/forecast/forecast_market.py",     # M4 forecasting + alerting
+    "ai/dataqa/data_quality.py",          # M5 data-quality report
 ]
 
 
