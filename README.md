@@ -1,10 +1,14 @@
 # AI-Augmented Real Estate Market Intelligence Platform
 
+![CI](https://github.com/keeeeeeeee921/idxexchange_da/actions/workflows/ci.yml/badge.svg)
+![Python](https://img.shields.io/badge/python-3.9%2B-blue)
+
 End-to-end analytics platform over **CRMLS California residential** MLS data
 (28 months, ~350K closed sales). It ingests data from live APIs, runs a
-reproducible cleaning/feature pipeline, and layers three AI modules on top —
-an LLM market-report writer, a natural-language data assistant, and an
-explainable home-valuation model — plus interactive Tableau dashboards.
+reproducible 16-stage cleaning/feature pipeline, and layers five AI modules on
+top — an LLM market-report writer, a natural-language data assistant, an
+explainable home-valuation model, a forecaster, and a data-quality agent — plus
+interactive Tableau dashboards.
 
 > Built during a data-analyst internship and extended into an **AI-augmented**
 > analytics project: AI is used as a force-multiplier for analysis and
@@ -15,6 +19,21 @@ explainable home-valuation model — plus interactive Tableau dashboards.
 included in this repo (CSVs, `.twbx`, SQL extracts, and the API extraction
 scripts are gitignored). All AI calls can run **fully locally** (Ollama), so
 confidential data never leaves the machine.
+
+---
+
+## Results at a glance
+
+| Module | What it does | Result |
+|---|---|---|
+| **M1** LLM report | Auto-writes statewide + per-county market commentary | Fact-sheet prompting → grounded, zero-fabrication narratives |
+| **M2** Chat-with-data | NL question → DuckDB SQL → answer | SELECT-only safety layer; small local model writes correct SQL |
+| **M3** AVM + SHAP | Explainable home valuation (leakage-free) | **R² 0.874, median APE 8.4%** on a forward-in-time test split |
+| **M4** Forecasting | 3-month SARIMAX forecast + alerts | Backtest **MAPE 2.4%** (price) |
+| **M5** Data quality | Rules + IsolationForest anomaly detection | 414K records; **25 anomalies the rules missed** |
+
+Plus: a live **FRED REST API** connector, a **16-stage** orchestrated pipeline,
+a 1-page market-intelligence brief, unit tests + CI, and Tableau dashboards.
 
 ---
 
@@ -107,8 +126,8 @@ between a local model and a cloud API with one env var, no code change.
 
 ## Data pipeline
 
-A 12-stage pipeline keeps the Sold and Listed chains in sync; run it whenever a
-new month of raw data is added:
+A 16-stage pipeline keeps the Sold and Listed chains in sync and regenerates
+every downstream artifact; run it whenever a new month of raw data is added:
 
 ```bash
 .venv/bin/python run_pipeline.py            # full pipeline
@@ -118,7 +137,18 @@ new month of raw data is added:
 
 Stages: monthly concat + Residential filter → EDA/validation + **FRED mortgage
 rate enrichment** → cleaning + date/geo checks → feature engineering → IQR
-outlier flagging → Tableau prep → EDA report.
+outlier flagging → Tableau prep → EDA report → per-county AI reports → AVM →
+forecast → data-quality. The LLM stages degrade to a deterministic stub if no
+model is available, so the pipeline never breaks on a missing model.
+
+## Tests
+
+```bash
+.venv/bin/python -m pytest tests/ -q        # also run in CI on every push
+```
+Unit tests cover the SQL safety guard, the calendar-month MoM/YoY logic, the
+AVM leakage exclusion, and JSON parsing — and run without the (gitignored) data
+or heavy libraries.
 
 ---
 
@@ -158,15 +188,19 @@ cp .env.example .env              # set LLM_PROVIDER, optional API keys
 ├── connectors/fred_connector.py     # FRED REST API connector (key auth, JSON)
 ├── ai/
 │   ├── shared/llm.py                # provider-agnostic LLM client
-│   ├── reporting/market_narrative.py# M1 — LLM market report
+│   ├── reporting/                   # M1 narrative engine, fan-out & brief
+│   │   ├── market_narrative.py      #   M1  — statewide LLM market report
+│   │   ├── county_reports.py        #   M1+ — per-county fan-out
+│   │   └── market_brief.py          #   capstone 1-page intelligence brief
 │   ├── assistant/text_to_sql.py     # M2 — NL → DuckDB SQL
 │   ├── models/avm/train_avm.py      # M3 — AVM + SHAP
 │   ├── forecast/forecast_market.py  # M4 — SARIMAX forecasting + alerts
 │   └── dataqa/data_quality.py       # M5 — data-quality + anomaly detection
 ├── app.py                           # M2 — Streamlit chat-with-data UI
 ├── eda_report.py                    # self-contained HTML EDA report (embeds M1)
-├── run_pipeline.py                  # pipeline orchestrator
+├── run_pipeline.py                  # 16-stage pipeline orchestrator
 ├── week{1..8}_*.py                  # pipeline stages (Sold & Listed chains)
+├── tests/ · .github/workflows/ci.yml  # unit tests + CI
 ├── requirements.txt · .env.example · AI_ROADMAP.md
 └── (gitignored) data/  *.csv  *.twbx  *.sql  crmls_*.py  .env  .venv  outputs/
 ```
