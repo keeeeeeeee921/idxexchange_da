@@ -17,6 +17,6 @@ jobs:
       # Only the light deps the unit tests need — no xgboost/shap/streamlit/
       # statsmodels (those are exercised by the runnable scripts, not the tests).
       - name: Install test dependencies
-        run: pip install pandas numpy matplotlib scikit-learn duckdb pytest
+        run: pip install pandas numpy matplotlib scikit-learn duckdb statsmodels pytest
       - name: Run tests
         run: pytest tests/ -q
