@@ -28,7 +28,7 @@ confidential data never leaves the machine.
 |---|---|---|
 | **M1** LLM report | Auto-writes statewide + per-county market commentary | Fact-sheet prompting → grounded, zero-fabrication narratives |
 | **M2** Chat-with-data | NL question → DuckDB SQL → answer | SELECT-only safety layer; small local model writes correct SQL |
-| **M3** AVM + SHAP | Explainable home valuation (leakage-free) | **R² 0.874, median APE 8.4%** on a forward-in-time test split |
+| **M3** AVM + SHAP | Explainable home valuation (leakage-free) | **R² 0.875, median APE 8.5%** on a whole-month forward-in-time split |
 | **M4** Forecasting | 3-month SARIMAX forecast + alerts | Backtest **MAPE 2.4%** (price) |
 | **M5** Data quality | Rules + IsolationForest anomaly detection | 414K records; **25 anomalies the rules missed** |
 
@@ -51,7 +51,7 @@ flowchart TD
     D --> I[M3 · AVM + SHAP<br/>ai/models/avm]
     D --> K[M4 · Forecasting + alerts<br/>ai/forecast]
     D --> L[M5 · Data-quality QA<br/>ai/dataqa]
-    G & H & I --> J[ai/shared/llm.py<br/>provider-agnostic LLM client]
+    G & H --> J[ai/shared/llm.py<br/>provider-agnostic LLM client]
 ```
 
 ---
@@ -93,7 +93,7 @@ sub-type, amenities, mortgage rate) — deliberately excluding `ListPrice`,
 ```bash
 .venv/bin/python ai/models/avm/train_avm.py    # writes metrics + SHAP plot to outputs/
 ```
-Test performance: **R² ≈ 0.875, median APE ≈ 8.1%, 58% of predictions within
+Test performance: **R² ≈ 0.875, median APE ≈ 8.5%, ~57% of predictions within
 ±10%**. Top SHAP drivers: **longitude, latitude, living area** — i.e. location
 and size. (Good-but-not-perfect metrics confirm the model is leakage-free.)
 
@@ -119,8 +119,9 @@ model catches what you didn't.
 .venv/bin/python ai/dataqa/data_quality.py        # writes data_quality.html to outputs/
 ```
 
-M1–M3 share one **provider-agnostic LLM client** (`ai/shared/llm.py`): switch
-between a local model and a cloud API with one env var, no code change.
+M1 and M2 share one **provider-agnostic LLM client** (`ai/shared/llm.py`):
+switch between a local model and a cloud API with one env var, no code change.
+(M3–M5 are pure deterministic ML — no LLM dependency, which is by design.)
 
 ---
 
