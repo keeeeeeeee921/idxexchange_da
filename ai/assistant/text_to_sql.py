@@ -16,7 +16,6 @@ every query is wrapped in an outer LIMIT so a stray query can't dump 349K rows.
 import os
 import re
 import sys
-import json
 
 import duckdb
 
@@ -64,18 +63,44 @@ SQL_SYSTEM = (
     "Output STRICT JSON only — no prose, no markdown."
 )
 
-# DDL/DML and side-effecting keywords are never allowed.
+# DDL/DML and side-effecting keywords are never allowed. (`replace` is omitted —
+# it's a legitimate DuckDB scalar function, and INSERT-OR-REPLACE is caught by
+# `insert`.)
 _FORBIDDEN = re.compile(
     r"\b(insert|update|delete|drop|alter|create|attach|detach|copy|pragma|"
-    r"export|import|install|load|call|set|truncate|replace|grant)\b",
+    r"export|import|install|load|call|set|truncate|grant)\b",
+    re.IGNORECASE,
+)
+
+# DuckDB file-access table functions — blocked as defense-in-depth on top of the
+# connection's disabled external access.
+_FILE_FUNCS = re.compile(
+    r"\b(read_csv|read_csv_auto|read_text|read_blob|read_json|read_json_auto|"
+    r"read_parquet|parquet_scan|sniff_csv|glob)\s*\(",
     re.IGNORECASE,
 )
 
 
+def _strip_sql_noise(sql):
+    """Remove comments and string literals so the keyword/semicolon scan can't
+    trip on tokens that merely appear inside them (e.g. WHERE City = ';')."""
+    s = re.sub(r"--[^\n]*", " ", sql)             # line comments
+    s = re.sub(r"/\*.*?\*/", " ", s, flags=re.S)  # block comments
+    s = re.sub(r"'(?:''|[^'])*'", "''", s)        # single-quoted string literals
+    return s
+
+
 def get_connection(csv_path=SOLD_CSV):
-    """In-memory DuckDB with the sold CSV loaded as table `sold`."""
+    """In-memory DuckDB with the sold CSV loaded as table `sold`.
+
+    External file access is disabled AFTER the table is loaded, so a crafted or
+    prompt-injected query can't read arbitrary local files (e.g. `.env`) via
+    DuckDB table functions like read_text()/read_csv_auto()/glob() and surface
+    them through the app.
+    """
     con = duckdb.connect()
     con.execute(f"CREATE TABLE {TABLE} AS SELECT * FROM read_csv_auto('{csv_path}')")
+    con.execute("SET enable_external_access=false")
     return con
 
 
@@ -103,25 +128,21 @@ def render_sql_prompt(question, schema):
     )
 
 
-def _extract_json(text):
-    t = text.strip()
-    if t.startswith("```"):
-        t = t.split("```", 2)[1]
-        t = t[4:] if t.lower().startswith("json") else t
-    start, end = t.find("{"), t.rfind("}")
-    if start != -1 and end != -1:
-        t = t[start:end + 1]
-    return json.loads(t)
+# JSON extraction lives in the shared LLM client (ai/shared/llm.extract_json).
 
 
 def is_safe_select(sql):
-    """Allow only a single SELECT/WITH statement; reject DDL/DML and multi-statement."""
-    s = sql.strip().rstrip(";").strip()
+    """Allow only a single read-only SELECT/WITH statement. Rejects DDL/DML,
+    stacked statements, and DuckDB file-access table functions. Comments and
+    string literals are stripped first so they don't cause false positives."""
+    s = _strip_sql_noise(sql).strip().rstrip(";").strip()
     if not re.match(r"(?is)^\s*(with|select)\b", s):
         return False
     if ";" in s:                      # no stacked statements
         return False
     if _FORBIDDEN.search(s):
+        return False
+    if _FILE_FUNCS.search(s):         # block read_text/read_csv/glob/... file access
         return False
     return True
 
@@ -132,7 +153,7 @@ def nl_to_sql(question, con, provider=None, model=None):
         system=SQL_SYSTEM, force_json=True,
         provider=provider, model=model, temperature=0.0,
     )
-    return _extract_json(raw)["sql"].strip()
+    return llm.extract_json(raw)["sql"].strip()
 
 
 def ask(question, con=None, max_rows=2000, provider=None, model=None):

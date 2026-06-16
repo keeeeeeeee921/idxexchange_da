@@ -64,7 +64,8 @@ def fit_forecast(series, steps):
     intervals. Falls back to a non-seasonal model if the fit fails."""
     try:
         res = _fit(series, (1, 1, 0), (1, 0, 0, 12))
-    except Exception:
+    except Exception as e:
+        print(f"  [forecast] seasonal model failed ({e}); using non-seasonal fallback (1,1,1).")
         res = _fit(series, (1, 1, 1), (0, 0, 0, 0))
     fc = res.get_forecast(steps=steps)
     return fc.predicted_mean, fc.conf_int(alpha=CI_ALPHA)
@@ -97,6 +98,7 @@ def main():
 
     results = {}
     fig, axes = plt.subplots(len(TARGETS), 1, figsize=(11, 8))
+    axes = np.atleast_1d(axes)            # so a single-target TARGETS still iterates
 
     for ax, tgt in zip(axes, TARGETS):
         col, label, money = tgt["col"], tgt["label"], tgt["money"]

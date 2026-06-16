@@ -73,18 +73,24 @@ def main():
     X, y_log, price, tkey = load_features()
     print(f"  {len(X):,} rows x {X.shape[1]} features (after one-hot)")
 
-    # Time-based split: train on the earliest 80% of sales, test on the most
-    # recent 20%. More honest than a random split for a valuation model — it
-    # measures how well the model generalises FORWARD in time, not by chance.
-    order = np.argsort(tkey, kind="stable")
-    cut = int(len(order) * 0.8)
-    tr_idx, te_idx = order[:cut], order[cut:]
-    X_tr, X_te = X.iloc[tr_idx], X.iloc[te_idx]
-    y_tr, y_te = y_log[tr_idx], y_log[te_idx]
-    price_te = price[te_idx]
+    # Time-based split on a MONTH BOUNDARY: train on earlier sales, test on the
+    # most recent ~20%. Splitting on whole months (not a row index) ensures no
+    # calendar month straddles the cut — otherwise the boundary month leaks into
+    # both train and test and inflates the "forward-in-time" evaluation.
+    months = np.sort(np.unique(tkey))
+    test_months, acc = set(), 0
+    for mk in months[::-1]:                 # walk back from the latest month
+        test_months.add(mk)
+        acc += int((tkey == mk).sum())
+        if acc >= 0.2 * len(tkey):
+            break
+    is_test = np.array([mk in test_months for mk in tkey])
+    X_tr, X_te = X[~is_test], X[is_test]
+    y_tr, y_te = y_log[~is_test], y_log[is_test]
+    price_te = price[is_test]
     tp = sorted(set(zip(X_te["close_year"].astype(int), X_te["close_month"].astype(int))))
     test_period = f"{tp[0][0]}-{tp[0][1]:02d} -> {tp[-1][0]}-{tp[-1][1]:02d}"
-    print(f"  time-based split: test = most recent 20% ({test_period})")
+    print(f"  time-based split (whole months): test = most recent {len(test_months)} months ({test_period})")
 
     print("\nTraining XGBoost ...")
     model = xgb.XGBRegressor(

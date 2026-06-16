@@ -125,3 +125,38 @@ def complete(prompt, system="", force_json=False, provider=None, model=None,
     if provider == "ollama":
         return _ollama(prompt, system, force_json, model, temperature, timeout)
     raise RuntimeError(f"no usable LLM provider (resolved: {provider!r})")
+
+
+def extract_json(text):
+    """Parse the first complete top-level JSON object from an LLM reply.
+
+    Tolerates markdown fences and trailing prose, and matches braces while
+    ignoring those inside string literals (a plain find/rfind can grab the
+    wrong closing brace). Raises ValueError if no valid object is found.
+    """
+    t = text.strip()
+    if t.startswith("```"):
+        t = t.split("```", 2)[1]
+        t = t[4:] if t.lower().startswith("json") else t
+    start = t.find("{")
+    if start == -1:
+        return json.loads(t)
+    depth, in_str, esc = 0, False, False
+    for i in range(start, len(t)):
+        c = t[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                in_str = False
+        elif c == '"':
+            in_str = True
+        elif c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return json.loads(t[start:i + 1])
+    return json.loads(t[start:])

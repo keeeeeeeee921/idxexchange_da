@@ -44,8 +44,15 @@ CONTEXT = ["City", "CountyOrParish", "PropertySubType"]
 
 
 def _flag_int(s):
-    return s.map({True: 1, False: 0, "True": 1, "False": 0,
-                  1: 1, 0: 0, "1": 1, "0": 0}).fillna(0).astype(int)
+    """Coerce a Y/N-style flag column (bool, 0/1, or 'true'/'false' strings,
+    any case) to 0/1; anything unrecognised or missing becomes 0."""
+    def conv(v):
+        if pd.isna(v):
+            return 0
+        if isinstance(v, str):
+            return 1 if v.strip().lower() in ("true", "1", "yes", "y", "t") else 0
+        return 1 if float(v) != 0 else 0
+    return s.map(conv).astype(int)
 
 
 def main():

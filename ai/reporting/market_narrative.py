@@ -36,8 +36,8 @@ def _pct_change(curr, prev):
 def build_market_metrics(monthly, newlist):
     """Compute a compact, LLM-friendly dict of market KPIs from the two
     monthly frames (monthly_market.csv + monthly_new_listings.csv)."""
-    m = monthly.sort_values("yr_mo").reset_index(drop=True)
-    nl = newlist.sort_values("yr_mo").set_index("yr_mo")
+    m = monthly.drop_duplicates("yr_mo", keep="last").sort_values("yr_mo").reset_index(drop=True)
+    nl = newlist.drop_duplicates("yr_mo", keep="last").sort_values("yr_mo").set_index("yr_mo")
 
     last = m.iloc[-1]
     # Match prior month / prior year by ACTUAL calendar month, not by row
@@ -50,10 +50,11 @@ def build_market_metrics(monthly, newlist):
         key = str(period)
         return by_ym.loc[key] if key in by_ym.index else None
 
-    prev = _row(latest_p - 1)
-    if prev is None:                       # fall back to last available month
-        prev = m.iloc[-2] if len(m) >= 2 else last
-    yoy = _row(latest_p - 12)
+    prev = _row(latest_p - 1)   # true previous calendar month (None if missing)
+    yoy = _row(latest_p - 12)   # same month a year earlier (None if missing)
+
+    def _mom(col):  # month-over-month only against the immediately prior month
+        return None if prev is None else _pct_change(last[col], prev[col])
 
     latest_ym = last["yr_mo"]
     new_listings_latest = float(nl["new_listings"].get(latest_ym, float("nan")))
@@ -79,9 +80,9 @@ def build_market_metrics(monthly, newlist):
             "new_listings": None if pd.isna(new_listings_latest) else int(new_listings_latest),
         },
         "mom_change_pct": {
-            "median_close_price": _pct_change(last["median_close_price"], prev["median_close_price"]),
-            "closed_sales": _pct_change(last["closed_sales"], prev["closed_sales"]),
-            "median_dom": _pct_change(last["median_dom"], prev["median_dom"]),
+            "median_close_price": _mom("median_close_price"),
+            "closed_sales": _mom("closed_sales"),
+            "median_dom": _mom("median_dom"),
         },
         "yoy_change_pct": None if yoy is None else {
             "median_close_price": _pct_change(last["median_close_price"], yoy["median_close_price"]),
@@ -173,15 +174,8 @@ def render_prompt(metrics):
 # 3. Narrative generation (LLM calls delegated to ai.shared.llm)
 # --------------------------------------------------------------------------- #
 def _parse_json_narrative(text):
-    """Tolerant parse: strip markdown fences, locate the JSON object."""
-    t = text.strip()
-    if t.startswith("```"):
-        t = t.split("```", 2)[1]
-        t = t[4:] if t.lower().startswith("json") else t
-    start, end = t.find("{"), t.rfind("}")
-    if start != -1 and end != -1:
-        t = t[start:end + 1]
-    return json.loads(t)
+    """Tolerant parse of the LLM's JSON reply (shared brace-matched extractor)."""
+    return llm.extract_json(text)
 
 
 def _stub_narrative(metrics):
@@ -190,6 +184,7 @@ def _stub_narrative(metrics):
     mom = metrics["mom_change_pct"]
     yoy = metrics.get("yoy_change_pct") or {}
     sd = metrics["supply_demand"]["new_listings_to_sales_ratio"]
+    sd_txt = "数据不足" if sd is None else sd
     price_mom = mom.get("median_close_price")
     price_yoy = yoy.get("median_close_price")
 
@@ -203,14 +198,14 @@ def _stub_narrative(metrics):
         f"（环比 {arrow(price_mom)}，同比 {arrow(price_yoy)}），"
         f"成交量 {lat['closed_sales']:,} 套，中位在售天数 {lat['median_dom']} 天。\n\n"
         f"成交价/原始挂牌价比为 {lat['avg_close_to_orig_ratio']}，"
-        f"当月新增挂牌/成交比约 {sd}，反映供需相对节奏。"
+        f"当月新增挂牌/成交比约 {sd_txt}，反映供需相对节奏。"
     )
     return {
         "headline": f"{lat['month']} 市场快照（占位示例，未接入 LLM）",
         "summary": summary,
         "watch": [
             "环比/同比价格变化是否由季节性驱动，需结合往年同月比较。",
-            f"新增挂牌/成交比 {sd} 偏离 1 的程度，提示供给或需求侧压力。",
+            f"新增挂牌/成交比 {sd_txt} 偏离 1 的程度，提示供给或需求侧压力。",
             "中位 DOM 的月度波动是否对应利率或季节变化。",
         ],
         "source": "stub",
