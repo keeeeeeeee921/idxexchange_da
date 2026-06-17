@@ -82,7 +82,17 @@ export.
 
 ```bash
 .venv/bin/streamlit run app.py
+.venv/bin/python eval/text2sql_eval.py   # gold-labelled accuracy eval (below)
 ```
+
+**Honest evaluation.** Text-to-SQL is error-prone, so `eval/text2sql_eval.py`
+scores it properly: a gold-labelled question set, 3 trials each, with
+result-set matching against a hand-written gold query (Spider/BIRD-style
+execution accuracy). Measured **execution accuracy: 50% (qwen2.5:3b) vs 75%
+(qwen2.5:7b)** — the bigger local model is the default, but even it gets a
+quarter wrong (some silently), which is exactly why the UI **always shows the
+generated SQL** and the guard is read-only. A frontier model (Claude) via the
+provider switch would score higher still.
 
 ### M3 · AVM home-valuation model + SHAP  ·  `ai/models/avm/train_avm.py`
 An explainable pricing decision-support model. XGBoost predicts `ClosePrice`
@@ -171,7 +181,7 @@ or heavy libraries.
 # 2. (Optional) free local LLM for M1/M2
 brew install ollama libomp        # libomp is also required by xgboost on macOS
 brew services start ollama
-ollama pull qwen2.5:3b
+ollama pull qwen2.5:7b            # 7b > 3b on text-to-SQL (see eval/); 3b is a faster fallback
 
 # 3. Config — copy and fill in
 cp .env.example .env              # set LLM_PROVIDER, optional API keys
@@ -202,6 +212,7 @@ cp .env.example .env              # set LLM_PROVIDER, optional API keys
 ├── run_pipeline.py                  # 16-stage pipeline orchestrator
 ├── week{1..8}_*.py                  # pipeline stages (Sold & Listed chains)
 ├── tests/ · .github/workflows/ci.yml  # unit tests + CI
+├── eval/text2sql_eval.py            # gold-labelled text-to-SQL accuracy eval
 ├── requirements.txt · .env.example · AI_ROADMAP.md
 └── (gitignored) data/  *.csv  *.twbx  *.sql  crmls_*.py  .env  .venv  outputs/
 ```

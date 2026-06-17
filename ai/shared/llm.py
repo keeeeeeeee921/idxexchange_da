@@ -25,7 +25,7 @@ except Exception:  # pragma: no cover
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_DEFAULT_MODEL = "claude-sonnet-4-6"
 OLLAMA_DEFAULT_HOST = "http://localhost:11434"
-OLLAMA_DEFAULT_MODEL = "qwen2.5:3b"
+OLLAMA_DEFAULT_MODEL = "qwen2.5:7b"  # 7b > 3b on text-to-SQL (eval: 75% vs 50%)
 
 
 # --------------------------------------------------------------------------- #
