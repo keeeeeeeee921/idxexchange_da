@@ -6,9 +6,7 @@ Unit tests for the core logic of the AI modules. These run WITHOUT the
 import pandas as pd
 
 from ai.assistant.text_to_sql import is_safe_select
-from ai.reporting.market_narrative import (
-    build_market_metrics, _parse_json_narrative, _fmt_pct,
-)
+from ai.reporting.market_narrative import build_market_metrics, _fmt_pct
 from ai.models.avm import train_avm
 
 
@@ -100,6 +98,4 @@ def test_fmt_pct():
     assert _fmt_pct(None) == "数据不足"
 
 
-def test_parse_json_narrative_tolerant():
-    assert _parse_json_narrative('```json\n{"a": 1}\n```')["a"] == 1
-    assert _parse_json_narrative('noise {"b": 2} trailing')["b"] == 2
+# JSON extraction moved to ai.shared.llm.extract_json — covered in test_hardening.py.

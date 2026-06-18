@@ -22,6 +22,25 @@ import json
 import pandas as pd
 
 from ai.shared import llm  # shared provider-agnostic LLM client (anthropic|ollama|stub)
+from ai.shared.reporting import fmt_pct, summary_to_paras, watch_to_li
+
+
+# Monthly sold-KPI aggregation — the single source of truth for the per-month
+# metric recipe, reused by county_reports.py and market_brief.py.
+MONTHLY_SOLD_AGG = dict(
+    closed_sales=("ClosePrice", "size"),
+    median_close_price=("ClosePrice", "median"),
+    median_dom=("DaysOnMarket", "median"),
+    median_price_per_sqft=("price_per_sqft", "median"),
+    avg_close_to_orig_ratio=("close_to_original_list_ratio", "mean"),
+)
+
+
+def monthly_sold_frame(sold, by="yr_mo"):
+    """Aggregate row-level sold data into the monthly KPI frame consumed by
+    build_market_metrics. `by` is 'yr_mo' (one market) or ['CountyOrParish','yr_mo']."""
+    keys = [by] if isinstance(by, str) else list(by)
+    return sold.groupby(keys).agg(**MONTHLY_SOLD_AGG).reset_index()
 
 
 # --------------------------------------------------------------------------- #
@@ -115,9 +134,7 @@ SYSTEM_PROMPT = (
 
 
 def _fmt_pct(x):
-    if x is None:
-        return "数据不足"
-    return f"+{x}%" if x >= 0 else f"{x}%"
+    return fmt_pct(x, "数据不足")
 
 
 def _facts_block(metrics):
@@ -173,11 +190,6 @@ def render_prompt(metrics):
 # --------------------------------------------------------------------------- #
 # 3. Narrative generation (LLM calls delegated to ai.shared.llm)
 # --------------------------------------------------------------------------- #
-def _parse_json_narrative(text):
-    """Tolerant parse of the LLM's JSON reply (shared brace-matched extractor)."""
-    return llm.extract_json(text)
-
-
 def _stub_narrative(metrics):
     """Deterministic placeholder so the report builds with no API key."""
     lat = metrics["latest"]
@@ -189,9 +201,7 @@ def _stub_narrative(metrics):
     price_yoy = yoy.get("median_close_price")
 
     def arrow(x):
-        if x is None:
-            return "—"
-        return f"+{x}%" if x >= 0 else f"{x}%"
+        return fmt_pct(x, "—")
 
     summary = (
         f"截至 {lat['month']}，中位成交价 ${lat['median_close_price']:,}"
@@ -228,7 +238,7 @@ def generate_narrative(metrics, provider=None, model=None):
             render_prompt(metrics), system=SYSTEM_PROMPT, force_json=True,
             provider=provider, model=model, temperature=0.3,
         )
-        data = _parse_json_narrative(raw)
+        data = llm.extract_json(raw)
         data.setdefault("headline", "")
         data.setdefault("summary", "")
         data.setdefault("watch", [])
@@ -244,10 +254,8 @@ def generate_narrative(metrics, provider=None, model=None):
 # 4. HTML rendering (for embedding in eda_report.py)
 # --------------------------------------------------------------------------- #
 def narrative_to_html(narrative):
-    paras = "".join(
-        f"<p>{p}</p>" for p in str(narrative.get("summary", "")).split("\n\n") if p.strip()
-    )
-    watch = "".join(f"<li>{w}</li>" for w in narrative.get("watch", []))
+    paras = summary_to_paras(narrative.get("summary", ""))
+    watch = watch_to_li(narrative.get("watch", []))
     badge = narrative.get("source", "stub")
     badge_label = "⚙️ 占位示例（未接入 LLM）" if badge.startswith("stub") else f"🤖 LLM 生成（{badge}）"
     return f"""

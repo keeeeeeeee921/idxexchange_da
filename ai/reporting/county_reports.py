@@ -15,8 +15,6 @@ Output: outputs/county_reports.html
 
 import os
 import sys
-import base64
-from io import BytesIO
 from datetime import datetime
 
 import pandas as pd
@@ -26,8 +24,11 @@ import matplotlib.pyplot as plt
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, BASE_DIR)
-from ai.reporting.market_narrative import build_market_metrics, generate_narrative
+from ai.reporting.market_narrative import (
+    build_market_metrics, generate_narrative, monthly_sold_frame,
+)
 from ai.shared import llm
+from ai.shared.reporting import fig_to_b64, summary_to_paras, watch_to_li
 
 TAB = os.path.join(BASE_DIR, "data", "processed", "tableau")
 OUT = os.path.join(BASE_DIR, "outputs", "county_reports.html")
@@ -44,13 +45,7 @@ def per_county_frames():
     listed = pd.read_csv(os.path.join(TAB, "tableau_listed.csv"),
                          usecols=["CountyOrParish", "yr_mo"])
 
-    sold_agg = (sold.groupby(["CountyOrParish", "yr_mo"]).agg(
-        closed_sales=("ClosePrice", "size"),
-        median_close_price=("ClosePrice", "median"),
-        median_dom=("DaysOnMarket", "median"),
-        median_price_per_sqft=("price_per_sqft", "median"),
-        avg_close_to_orig_ratio=("close_to_original_list_ratio", "mean"),
-    ).reset_index())
+    sold_agg = monthly_sold_frame(sold, by=["CountyOrParish", "yr_mo"])
     list_agg = (listed.groupby(["CountyOrParish", "yr_mo"])
                 .size().reset_index(name="new_listings"))
 
@@ -64,10 +59,7 @@ def sparkline_b64(series):
     ax.plot(range(len(series)), series, color="#4c72b0", lw=1.5)
     ax.fill_between(range(len(series)), series, series.min(), color="#4c72b0", alpha=0.12)
     ax.axis("off")
-    buf = BytesIO()
-    fig.savefig(buf, format="png", bbox_inches="tight", transparent=True, dpi=110)
-    plt.close(fig)
-    return base64.b64encode(buf.getvalue()).decode("ascii")
+    return fig_to_b64(fig, transparent=True, dpi=110)
 
 
 # --------------------------------------------------------------------------- #
@@ -85,8 +77,8 @@ def card_html(county, metrics, narrative, spark):
     lat = metrics["latest"]
     mom = metrics["mom_change_pct"]
     yoy = metrics.get("yoy_change_pct") or {}
-    paras = "".join(f"<p>{p}</p>" for p in str(narrative.get("summary", "")).split("\n\n") if p.strip())
-    watch = "".join(f"<li>{w}</li>" for w in narrative.get("watch", []))
+    paras = summary_to_paras(narrative.get("summary", ""))
+    watch = watch_to_li(narrative.get("watch", []))
     return f"""
     <div class="card">
       <div class="card-head">

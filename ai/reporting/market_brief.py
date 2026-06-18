@@ -13,8 +13,6 @@ Output: outputs/market_brief_<county>.html
 
 import os
 import sys
-import base64
-from io import BytesIO
 from datetime import datetime
 
 import pandas as pd
@@ -24,8 +22,11 @@ import matplotlib.pyplot as plt
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, BASE_DIR)
-from ai.reporting.market_narrative import build_market_metrics, generate_narrative
+from ai.reporting.market_narrative import (
+    build_market_metrics, generate_narrative, monthly_sold_frame,
+)
 from ai.shared import llm
+from ai.shared.reporting import fig_to_b64, fmt_pct, summary_to_paras, watch_to_li
 
 TAB = os.path.join(BASE_DIR, "data", "processed", "tableau")
 
@@ -45,22 +46,9 @@ def load_county(county):
 
 
 def monthly_frames(sold, listed):
-    sold_m = (sold.groupby("yr_mo").agg(
-        closed_sales=("ClosePrice", "size"),
-        median_close_price=("ClosePrice", "median"),
-        median_dom=("DaysOnMarket", "median"),
-        median_price_per_sqft=("price_per_sqft", "median"),
-        avg_close_to_orig_ratio=("close_to_original_list_ratio", "mean"),
-    ).reset_index().sort_values("yr_mo"))
+    sold_m = monthly_sold_frame(sold, by="yr_mo").sort_values("yr_mo")
     list_m = listed.groupby("yr_mo").size().reset_index(name="new_listings")
     return sold_m, list_m
-
-
-def fig_b64(fig):
-    buf = BytesIO()
-    fig.savefig(buf, format="png", bbox_inches="tight", dpi=110)
-    plt.close(fig)
-    return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
 def trend_chart(sold_m, list_m):
@@ -75,7 +63,7 @@ def trend_chart(sold_m, list_m):
     a2.set_title("Activity: closed sales vs new listings", fontsize=10)
     a2.legend(fontsize=8)
     a2.set_xticks([])
-    return fig_b64(fig)
+    return fig_to_b64(fig, dpi=110)
 
 
 def competitive(sold, n=5):
@@ -99,19 +87,19 @@ def main():
     lat, mom = metrics["latest"], metrics["mom_change_pct"]
     yoy = metrics.get("yoy_change_pct") or {}
 
-    def pct(x):
-        return "—" if x is None else (f"+{x}%" if x >= 0 else f"{x}%")
+    pct = fmt_pct   # shared signed-percent formatter (None -> "—")
 
     def comp_rows(rows):
         return "".join(
             f"<tr><td class='l'>{nm}</td><td>${v/1e6:.1f}M</td><td>{u:,}</td></tr>"
             for nm, v, u in rows)
 
-    overview = "".join(f"<p>{p}</p>" for p in str(narrative["summary"]).split("\n\n") if p.strip())
-    takeaways = "".join(f"<li>{w}</li>" for w in narrative.get("watch", []))
+    overview = summary_to_paras(narrative["summary"])
+    takeaways = watch_to_li(narrative.get("watch", []))
     gen = datetime.now().strftime("%Y-%m-%d")
     cov = metrics["coverage"]
-    badge = llm.resolve_provider() + ":" + llm.resolve_model(llm.resolve_provider())
+    provider = llm.resolve_provider()
+    badge = f"{provider}:{llm.resolve_model(provider)}"
 
     html = f"""<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
 <title>{county} Market Intelligence Brief</title>{CSS}</head><body>

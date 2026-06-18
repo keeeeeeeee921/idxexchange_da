@@ -21,8 +21,6 @@ narrative around the charts is Chinese and rendered by the browser.
 
 import os
 import sys
-import base64
-from io import BytesIO
 from datetime import datetime
 
 import numpy as np
@@ -53,6 +51,7 @@ sys.path.insert(0, BASE_DIR)
 from ai.reporting.market_narrative import (
     build_market_metrics, generate_narrative, narrative_to_html,
 )
+from ai.shared.reporting import fig_to_b64 as fig_b64
 
 print("=" * 70)
 print("EDA REPORT GENERATOR — WEEKS 1-7")
@@ -62,15 +61,6 @@ print("=" * 70)
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-def fig_b64(fig):
-    """Render a matplotlib figure to a base64 PNG and close it."""
-    buf = BytesIO()
-    fig.savefig(buf, format="png", bbox_inches="tight")
-    plt.close(fig)
-    buf.seek(0)
-    return base64.b64encode(buf.read()).decode("ascii")
-
-
 SECTIONS = []  # list of (html string)
 CHART_COUNT = 0
 
@@ -101,19 +91,21 @@ def fmt(n, money=False):
 # ---------------------------------------------------------------------------
 print("\nLoading datasets...")
 sold = pd.read_csv(SOLD_PATH, low_memory=False)
-listed = pd.read_csv(LISTED_PATH, low_memory=False)
 monthly = pd.read_csv(MONTHLY_PATH)
 newlist = pd.read_csv(NEWLIST_PATH)
 
 for col in ["CloseDate"]:
     if col in sold.columns:
         sold[col] = pd.to_datetime(sold[col], errors="coerce")
-for col in ["ListingContractDate"]:
-    if col in listed.columns:
-        listed[col] = pd.to_datetime(listed[col], errors="coerce")
+
+# The listed dataset is only needed for its row/column count in the overview
+# table, so count cheaply instead of loading the full ~300 MB flagged file.
+listed_cols = len(pd.read_csv(LISTED_PATH, nrows=0).columns)
+with open(LISTED_PATH) as _f:
+    listed_rows = sum(1 for _ in _f) - 1  # minus header
 
 print(f"  sold   : {sold.shape[0]:,} x {sold.shape[1]}")
-print(f"  listed : {listed.shape[0]:,} x {listed.shape[1]}")
+print(f"  listed : {listed_rows:,} x {listed_cols}")
 
 sold_min, sold_max = monthly["yr_mo"].min(), monthly["yr_mo"].max()
 list_min, list_max = newlist["yr_mo"].min(), newlist["yr_mo"].max()
@@ -140,7 +132,7 @@ add_html(f"""
 <table>
   <tr><th>数据集</th><th>记录数</th><th>字段数</th><th>时间覆盖（月）</th></tr>
   <tr><td>Sold（成交，含 flag）</td><td>{sold.shape[0]:,}</td><td>{sold.shape[1]}</td><td>{sold_min} → {sold_max}</td></tr>
-  <tr><td>Listing（挂牌，含 flag）</td><td>{listed.shape[0]:,}</td><td>{listed.shape[1]}</td><td>{list_min} → {list_max}</td></tr>
+  <tr><td>Listing（挂牌，含 flag）</td><td>{listed_rows:,}</td><td>{listed_cols}</td><td>{list_min} → {list_max}</td></tr>
 </table>
 <p class="flow"><b>流水线：</b>
 Week1 拼接 27 个月文件 + 筛选 Residential →

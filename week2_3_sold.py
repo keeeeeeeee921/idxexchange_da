@@ -219,6 +219,10 @@ except Exception as e:
     sold['rate_30yr_fixed'] = np.nan
     sold['year_month'] = pd.to_datetime(sold['CloseDate']).dt.to_period('M')
 
+# year_month (the FRED-merge key) is not consumed downstream — yr_mo is created
+# fresh in week6 — so drop it instead of carrying it through every later CSV.
+sold = sold.drop(columns="year_month", errors="ignore")
+
 # =============================================================================
 # Save output
 # =============================================================================
