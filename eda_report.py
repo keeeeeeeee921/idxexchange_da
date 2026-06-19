@@ -370,9 +370,9 @@ add_html(f"""
 中间产物用 CSV 导致每个 week 都要重新 <code>to_datetime</code>，建议改 <b>Parquet</b>（保留 dtype、更小更快）。</p></div>
 
 <div class="finding p3"><h3>P3 — 数据卫生</h3>
-<p>原始拼接里 Sold/Listed 各有约 590 / 159 条 <code>ListingKey</code> 完全重复，建议 week1 加 <code>drop_duplicates</code>；
-<code>ListOfficeName</code> 等文本字段含换行符导致个别行 round-trip 丢失；week6 的 segment 汇总只 print 未落盘；
-<code>year_month</code> 与 <code>yr_mo</code> 两套月份列冗余可统一。</p></div>
+<p>原始拼接里 Sold/Listed 各有约 590 / 159 条 <code>ListingKey</code> 完全重复，建议 week1 加 <code>drop_duplicates</code>。
+<code>ListOfficeName</code> 等文本字段确含内嵌换行符，但经核验 pandas 默认引号可<b>无损 round-trip</b>（raw 与各阶段行数一致、无丢行），非缺陷。
+<code>year_month</code> 与 <code>yr_mo</code> 的双月份列冗余已在 week2-3 移除（仅保留 <code>yr_mo</code>）。</p></div>
 """)
 
 # ===========================================================================
